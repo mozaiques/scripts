@@ -1,0 +1,141 @@
+#!/usr/bin/env python3.5
+# -*- coding: utf-8 -*-
+# Version 2016-02-04 / https://github.com/mozaiques/scripts
+import logging
+import os
+import shutil
+import sys
+import tarfile
+import tempfile
+import zipfile
+
+
+if os.environ.get('VIRTUAL_ENV', None) is None:
+    print('This script has to be run inside a virtualenv.')
+    sys.exit(1)
+
+
+try:
+    import pip
+except ImportError:
+    print('This script requires at least the `pip` package.')
+    sys.exit(1)
+
+
+try:
+    import click
+except ImportError:
+    print('Installing click\n')
+    pip.main(['install', 'click'])
+    print('')
+    import click
+
+
+try:
+    import github3
+except ImportError:
+    click.secho('Installing github3.py\n', fg='blue', bold=True)
+    pip.main([
+        'install',
+        'https://github.com/b4stien/github3.py/archive/develop.zip',
+    ])
+    print('')
+    import github3
+logging.getLogger('github3').setLevel(logging.WARNING)
+
+
+@click.command()
+@click.argument('repository')
+@click.option('--github_token')
+@click.option('--with_assets', is_flag=True)
+def deploy(repository, github_token, with_assets):
+    """
+    This script will deploy the given REPOSITORY (eg:
+    "mozaiques/zombase") into the current virtualenv.
+
+    """
+    if len(repository.split('/')) != 2:
+        click.secho('Wrong format for repository.', fg='red', bold=True)
+        sys.exit(1)
+
+    if github_token is None:
+        click.secho(
+            'Can\'t continue without a GitHub token.', fg='red', bold=True)
+        sys.exit(1)
+
+    click.secho('Connecting to {}\n'.format(repository), fg='blue', bold=True)
+
+    gh = github3.login(token=github_token)
+    repo = gh.repository(*repository.split('/'))
+
+    if not repo:
+        click.secho('Repository not found.', fg='red', bold=True)
+        sys.exit(1)
+
+    tmp_dir = tempfile.TemporaryDirectory()
+
+    release_tarball_path = os.path.join(tmp_dir.name, 'release.tar.gz')
+    release_req_path = os.path.join(tmp_dir.name, 'requirements.txt')
+
+    try:
+        release = list(repo.releases(1))[0]
+    except IndexError:
+        click.secho('No release found.', fg='red', bold=True)
+        sys.exit(1)
+
+    click.secho(
+        'Found release {}\n'.format(release.tag_name), fg='blue', bold=True)
+
+    click.secho('Downloading release\n', fg='blue', bold=True)
+
+    release.archive('tarball', release_tarball_path)
+
+    with tarfile.open(release_tarball_path, 'r:gz') as release_tarball:
+        reqs = release_tarball.getmember(
+            release_tarball.getnames()[0] + '/requirements.txt')
+        raw_reqs_fo = release_tarball.extractfile(reqs)
+        with open(release_req_path, 'wb') as reqs_fo:
+            reqs_fo.write(raw_reqs_fo.read())
+
+    click.secho('Installing requirements\n', fg='blue', bold=True)
+    pip.main(['install', '-r', release_req_path])
+    click.secho('')
+
+    click.secho('Installing release\n', fg='blue', bold=True)
+    pip.main(['install', release_tarball_path, '--upgrade'])
+    click.secho('')
+
+    if with_assets:
+        assets_zipball_path = os.path.join(tmp_dir.name, 'assets.zip')
+
+        for asset in release.assets():
+            if asset.name != 'assets.zip':
+                continue
+
+            click.secho('Downloading assets.zip\n', fg='blue', bold=True)
+            asset.download(assets_zipball_path)
+
+            break
+
+        else:
+            click.secho(
+                'No suitable asset found (expecting a `assets.zip`).',
+                fg='red',
+                bold=True,
+            )
+            sys.exit(1)
+
+        click.secho('Extracting assets\n', fg='blue', bold=True)
+
+        shutil.rmtree('build', True)
+        os.mkdir('build')
+
+        assets_zipfile = zipfile.ZipFile(assets_zipball_path)
+        assets_zipfile.extractall('build')
+
+    click.secho(
+        'Release {} deployed.'.format(release.tag_name), fg='blue', bold=True)
+
+
+if __name__ == '__main__':
+    deploy()
