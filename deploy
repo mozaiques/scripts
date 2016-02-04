@@ -127,11 +127,11 @@ def deploy(repository, github_token, with_assets):
 
         click.secho('Extracting assets\n', fg='blue', bold=True)
 
-        shutil.rmtree('build', True)
-        os.mkdir('build')
+        shutil.rmtree('assets', True)
+        os.mkdir('assets')
 
         assets_zipfile = zipfile.ZipFile(assets_zipball_path)
-        assets_zipfile.extractall('build')
+        assets_zipfile.extractall('assets')
 
     click.secho(
         'Release {} deployed.'.format(release.tag_name), fg='blue', bold=True)
