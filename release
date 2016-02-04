@@ -1,0 +1,143 @@
+#!/usr/bin/env python3.5
+# -*- coding: utf-8 -*-
+# Version 2016-02-04 / https://github.com/mozaiques/scripts
+import hashlib
+import io
+import os
+import subprocess
+import sys
+import zipfile
+
+import click
+import github3
+
+from zombase.cli import compute_semver, set_filename_version, flags_to_release
+
+
+# Drop to pdb on error
+def info(type, value, tb):
+    import traceback
+    import pdb
+    traceback.print_exception(type, value, tb)
+    pdb.post_mortem(tb)
+sys.excepthook = info
+
+
+@click.command()
+@click.option('--minor', is_flag=True)
+@click.option('--major', is_flag=True)
+@click.option('--github_token')
+@click.pass_context
+def release(ctx, minor, major, github_token):
+    github_token = github_token or ctx.obj.get('github_token', None)
+    if github_token is None:
+        click.secho(
+            'Can\'t continue without a GitHub token.', fg='red', bold=True)
+        sys.exit(1)
+
+    project_name = ctx.obj.get('project_name', None)
+    if project_name is None:
+        click.secho(
+            'Can\'t continue without a project name.',
+            fg='red',
+            bold=True,
+        )
+        sys.exit(1)
+
+    repository = ctx.obj.get('repository', None)
+    if repository is None:
+        click.secho(
+            'Can\'t continue without a repository.',
+            fg='red',
+            bold=True,
+        )
+        sys.exit(1)
+
+    current_version = ctx.obj.get('current_version', None)
+    if current_version is None:
+        click.secho(
+            'Can\'t continue without the current version.',
+            fg='red',
+            bold=True,
+        )
+        sys.exit(1)
+
+    rootpath = ctx.obj.get('rootpath', None)
+    if rootpath is None:
+        click.secho(
+            'Can\'t continue without the project root directory.',
+            fg='red',
+            bold=True,
+        )
+        sys.exit(1)
+
+    release = flags_to_release(is_minor=minor, is_major=major)
+    release_version, next_version = compute_semver(current_version, release)
+
+    to_version_stamp = ctx.obj.get('to_version_stamp', None)
+    if to_version_stamp is None:
+        to_version_stamp = []
+
+    for filename, handle in to_version_stamp:
+        set_filename_version(filename, release_version, handle)
+        subprocess.call(['git', 'add', filename], cwd=rootpath)
+
+    subprocess.call(
+        ['git', 'commit', '-m', 'Release {} {}'.format(project_name, release_version)],
+        cwd=rootpath,
+    )
+    subprocess.call(
+        ['git', 'tag', '-a', release_version, '-m', '{} {}'.format(project_name, release_version)],
+        cwd=rootpath,
+    )
+
+    for filename, handle in to_version_stamp:
+        set_filename_version(filename, next_version, handle)
+        subprocess.call(['git', 'add', filename], cwd=rootpath)
+
+    subprocess.call(
+        ['git', 'commit', '-m', 'This is {} {}'.format(project_name, next_version)],
+        cwd=rootpath,
+    )
+
+    subprocess.call(
+        ['git', 'push', 'github', 'master:master', '--tags'], cwd=rootpath)
+
+    gh = github3.login(token=github_token)
+    a_te = gh.repository(*repository.split('/'))
+
+    gh_release = a_te.create_release(release_version)
+
+    assets = ctx.obj.get('assets', None)
+    if assets is None:
+        return
+
+    for script in assets['pre_scripts']:
+        subprocess.call(script, cwd=rootpath)
+
+    version_hash = hashlib.md5(release_version.encode()).hexdigest()[:6]
+    assets_fo = io.BytesIO()
+
+    with zipfile.ZipFile(assets_fo, 'w') as zip_file:
+        for filename in assets['to_tag']:
+            filename_split = filename.split('.')
+            filename_split.insert(-1, version_hash)
+            tagged_filename = '.'.join(filename_split)
+
+            zip_file.write(
+                os.path.abspath(os.path.join(assets['base_path'], filename)),
+                tagged_filename
+            )
+
+        for filename in assets['to_not_tag']:
+            zip_file.write(
+                os.path.abspath(os.path.join(assets['base_path'], filename)),
+                filename
+            )
+
+    assets_fo.seek(0)
+    gh_release.upload_asset('application/zip', 'assets.zip', assets_fo)
+
+
+if __name__ == '__main__':
+    release(obj={})
