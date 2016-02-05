@@ -1,11 +1,12 @@
 #!/usr/bin/env python3.5
 # -*- coding: utf-8 -*-
-# Version 2016-02-04 / https://github.com/mozaiques/scripts
+# Version 2016-02-05 / https://github.com/mozaiques/scripts
 import hashlib
 import io
 import os
 import subprocess
 import sys
+import time
 import zipfile
 
 import click
@@ -71,16 +72,41 @@ def release(ctx, minor, major, github_token):
         )
         sys.exit(1)
 
+    gh = github3.login(token=github_token)
+    repository = gh.repository(*repository.split('/'))
+
+    click.secho('Connecting to {}\n'.format(repository), fg='blue', bold=True)
+
+    if not repository:
+        click.secho('Repository not found.', fg='red', bold=True)
+        sys.exit(1)
+
     release = flags_to_release(is_minor=minor, is_major=major)
     release_version, next_version = compute_semver(current_version, release)
+
+    click.secho(
+        'Current version was {}, released version is {} and next version will '
+        'be {}\n'.format(current_version, release_version, next_version),
+        fg='blue',
+        bold=True
+    )
 
     to_version_stamp = ctx.obj.get('to_version_stamp', None)
     if to_version_stamp is None:
         to_version_stamp = []
 
+    click.secho(
+        'Stamping {} file(s) for released version\n'.format(
+            len(to_version_stamp)),
+        fg='blue',
+        bold=True
+    )
+
     for filename, handle in to_version_stamp:
         set_filename_version(filename, release_version, handle)
         subprocess.call(['git', 'add', filename], cwd=rootpath)
+
+    click.secho('Committing & tagging released version\n', fg='blue', bold=True)
 
     subprocess.call(
         ['git', 'commit', '-m', 'Release {} {}'.format(project_name, release_version)],
@@ -91,52 +117,82 @@ def release(ctx, minor, major, github_token):
         cwd=rootpath,
     )
 
+    click.secho(
+        '\nStamping {} file(s) for next version\n'.format(
+            len(to_version_stamp)),
+        fg='blue',
+        bold=True
+    )
+
     for filename, handle in to_version_stamp:
         set_filename_version(filename, next_version, handle)
         subprocess.call(['git', 'add', filename], cwd=rootpath)
+
+    click.secho('Committing next version\n', fg='blue', bold=True)
 
     subprocess.call(
         ['git', 'commit', '-m', 'This is {} {}'.format(project_name, next_version)],
         cwd=rootpath,
     )
 
+    click.secho('\nPushing new commits & tags\n', fg='blue', bold=True)
+
     subprocess.call(
         ['git', 'push', 'github', 'master:master', '--tags'], cwd=rootpath)
 
-    gh = github3.login(token=github_token)
-    a_te = gh.repository(*repository.split('/'))
+    click.secho(
+        '\nWaiting 2s for GitHub to process release tag\n',
+        fg='blue',
+        bold=True,
+    )
+    time.sleep(2)
 
-    gh_release = a_te.create_release(release_version)
+    click.secho('Creating new GitHub release\n', fg='blue', bold=True)
+
+    gh_release = repository.create_release(release_version)
 
     assets = ctx.obj.get('assets', None)
-    if assets is None:
-        return
+    if assets is not None:
+        click.secho(
+            'Executing {} pre-script(s)\n'.format(len(assets['pre_scripts'])),
+            fg='blue',
+            bold=True,
+        )
+        for script in assets['pre_scripts']:
+            subprocess.call(script, cwd=rootpath)
 
-    for script in assets['pre_scripts']:
-        subprocess.call(script, cwd=rootpath)
+        click.secho('\nBuilding assets zipfile\n', fg='blue', bold=True)
 
-    version_hash = hashlib.md5(release_version.encode()).hexdigest()[:6]
-    assets_fo = io.BytesIO()
+        version_hash = hashlib.md5(release_version.encode()).hexdigest()[:6]
+        assets_fo = io.BytesIO()
 
-    with zipfile.ZipFile(assets_fo, 'w') as zip_file:
-        for filename in assets['to_tag']:
-            filename_split = filename.split('.')
-            filename_split.insert(-1, version_hash)
-            tagged_filename = '.'.join(filename_split)
+        with zipfile.ZipFile(assets_fo, 'w') as zip_file:
+            for filename in assets['to_tag']:
+                filename_split = filename.split('.')
+                filename_split.insert(-1, version_hash)
+                tagged_filename = '.'.join(filename_split)
 
-            zip_file.write(
-                os.path.abspath(os.path.join(assets['base_path'], filename)),
-                tagged_filename
-            )
+                zip_file.write(
+                    os.path.abspath(os.path.join(assets['base_path'], filename)),
+                    tagged_filename
+                )
 
-        for filename in assets['to_not_tag']:
-            zip_file.write(
-                os.path.abspath(os.path.join(assets['base_path'], filename)),
-                filename
-            )
+            for filename in assets['to_not_tag']:
+                zip_file.write(
+                    os.path.abspath(os.path.join(assets['base_path'], filename)),
+                    filename
+                )
 
-    assets_fo.seek(0)
-    gh_release.upload_asset('application/zip', 'assets.zip', assets_fo)
+        click.secho('Uploading zipfile to GitHub\n', fg='blue', bold=True)
+
+        assets_fo.seek(0)
+        gh_release.upload_asset('application/zip', 'assets.zip', assets_fo)
+
+    click.secho(
+        'Release {} pushed to GitHub.'.format(release_version),
+        fg='blue',
+        bold=True,
+    )
 
 
 if __name__ == '__main__':

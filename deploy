@@ -1,6 +1,6 @@
 #!/usr/bin/env python3.5
 # -*- coding: utf-8 -*-
-# Version 2016-02-04 / https://github.com/mozaiques/scripts
+# Version 2016-02-05 / https://github.com/mozaiques/scripts
 import logging
 import os
 import shutil
@@ -8,6 +8,15 @@ import sys
 import tarfile
 import tempfile
 import zipfile
+
+
+# Drop to pdb on error
+def info(type, value, tb):
+    import traceback
+    import pdb
+    traceback.print_exception(type, value, tb)
+    pdb.post_mortem(tb)
+sys.excepthook = info
 
 
 if os.environ.get('VIRTUAL_ENV', None) is None:
@@ -66,9 +75,9 @@ def deploy(repository, github_token, with_assets):
     click.secho('Connecting to {}\n'.format(repository), fg='blue', bold=True)
 
     gh = github3.login(token=github_token)
-    repo = gh.repository(*repository.split('/'))
+    repository = gh.repository(*repository.split('/'))
 
-    if not repo:
+    if not repository:
         click.secho('Repository not found.', fg='red', bold=True)
         sys.exit(1)
 
@@ -78,7 +87,7 @@ def deploy(repository, github_token, with_assets):
     release_req_path = os.path.join(tmp_dir.name, 'requirements.txt')
 
     try:
-        release = list(repo.releases(1))[0]
+        release = list(repository.releases(1))[0]
     except IndexError:
         click.secho('No release found.', fg='red', bold=True)
         sys.exit(1)
