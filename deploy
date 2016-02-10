@@ -1,6 +1,6 @@
-#!/usr/bin/env python3.5
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Version 2016-02-05 / https://github.com/mozaiques/scripts
+# Version 2016-02-10 / https://github.com/mozaiques/scripts
 import logging
 import os
 import shutil
