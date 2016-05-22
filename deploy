@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Version 2016-02-10 / https://github.com/mozaiques/scripts
+# Version 2016-04-19 / https://github.com/mozaiques/scripts
 import logging
 import os
 import shutil
@@ -44,10 +44,7 @@ try:
     import github3
 except ImportError:
     click.secho('Installing github3.py\n', fg='blue', bold=True)
-    pip.main([
-        'install',
-        'https://github.com/b4stien/github3.py/archive/develop.zip',
-    ])
+    pip.main(['install', 'github3.py>=1.0.0a4'])
     print('')
     import github3
 logging.getLogger('github3').setLevel(logging.WARNING)

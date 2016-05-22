@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Version 2016-02-10 / https://github.com/mozaiques/scripts
+# Version 2016-05-22 / https://github.com/mozaiques/scripts
+import glob
 import hashlib
 import io
 import os
@@ -166,7 +167,7 @@ def release(ctx, minor, major, github_token):
         version_hash = hashlib.md5(release_version.encode()).hexdigest()[:6]
         assets_fo = io.BytesIO()
 
-        with zipfile.ZipFile(assets_fo, 'w') as zip_file:
+        with zipfile.ZipFile(assets_fo, 'w', zipfile.ZIP_DEFLATED) as zip_file:
             for filename in assets['to_tag']:
                 filename_split = filename.split('.')
                 filename_split.insert(-1, version_hash)
@@ -177,7 +178,12 @@ def release(ctx, minor, major, github_token):
                     tagged_filename
                 )
 
-            for filename in assets['to_not_tag']:
+            filenames_to_not_tag = (
+                os.path.relpath(filename, start=assets['base_path'])
+                for raw_filename in assets['to_not_tag']
+                for filename in glob.glob(os.path.join(assets['base_path'], raw_filename))
+            )
+            for filename in filenames_to_not_tag:
                 zip_file.write(
                     os.path.abspath(os.path.join(assets['base_path'], filename)),
                     filename
